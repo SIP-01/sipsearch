@@ -22,7 +22,10 @@ QString searchCli()
     const QString custom = qEnvironmentVariable("SIP01_SEARCH");
     if (!custom.isEmpty())
         return custom;
-    const QString home = QStandardPaths::writableLocation(QStandardPaths::HomeLocation);
+    // QStandardPaths::HomeLocation is not the home directory on every
+    // platform and under every application setup, so the passwd entry is
+    // what the shell would resolve too.
+    const QString home = QDir::homePath();
     return home + "/.local/bin/sip01-search";
 }
 
@@ -156,6 +159,11 @@ void Backend::refresh()
     m_process = new QProcess(this);
     connect(m_process, &QProcess::finished, this, &Backend::onRefreshFinished);
     connect(m_process, &QProcess::errorOccurred, this, &Backend::onRefreshError);
+    connect(m_process, &QProcess::readyReadStandardError, this, [this] {
+        const QByteArray error = m_process->readAllStandardError();
+        if (!error.isEmpty())
+            qWarning("sip01-search: %s", error.constData());
+    });
     // The dump is a few megabytes of JSON, more than a pipe buffer holds, so
     // drain it as it arrives or the child blocks writing and never finishes.
     connect(m_process, &QProcess::readyReadStandardOutput, this, [this] {
@@ -169,16 +177,24 @@ void Backend::refresh()
 void Backend::onRefreshFinished(int code, QProcess::ExitStatus status)
 {
     m_busy = false;
+    const QByteArray error = m_process->readAllStandardError();
     if (code != 0 || status != QProcess::NormalExit) {
         m_status = tr("The index could not be reached");
+        if (!error.isEmpty())
+            qWarning("sip01-search failed: %s", error.constData());
         emit statusChanged();
         return;
     }
 
     const QByteArray output = m_output.isEmpty() ? m_process->readAllStandardOutput() : m_output;
     m_output.clear();
-    const QJsonArray rows = QJsonDocument::fromJson(output)
-                                .object().value("hits").toArray();
+    const QJsonDocument document = QJsonDocument::fromJson(output);
+    const QJsonArray rows = document.object().value("hits").toArray();
+    if (rows.isEmpty()) {
+        m_status = tr("The index could not be read");
+        emit statusChanged();
+        return;
+    }
 
     m_corpus.clear();
     m_corpus.reserve(rows.size());

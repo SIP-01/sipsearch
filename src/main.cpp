@@ -1,5 +1,6 @@
 // sipsearch — search the decentralized SIP-01 web index.
 
+#include <QCoreApplication>
 #include <QGuiApplication>
 #include <QIcon>
 #include <QJsonArray>
@@ -40,9 +41,13 @@ int runHeadless(const QStringList &arguments)
     Backend backend;
     if (refresh || backend.totalDocuments() == 0) {
         backend.refresh();
-        // The refresh is a child process; wait for it to land.
-        for (int i = 0; i < 900 && backend.totalDocuments() == 0; ++i)
-            QThread::msleep(100);
+        // The refresh runs a child process and reports back through the
+        // event loop. processEvents returns as soon as the queue is empty,
+        // so the wait has to be on the process itself, not on a timer.
+        for (int i = 0; i < 1800 && backend.totalDocuments() == 0; ++i) {
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 100);
+            QThread::msleep(50);
+        }
     }
 
     const auto rows = backend.search(query, limit);
@@ -61,16 +66,25 @@ int runHeadless(const QStringList &arguments)
 } // namespace
 
 int main(int argc, char *argv[]) {
-    // A headless run needs no display, so it must not create a GUI app first.
-    for (int i = 1; i < argc; ++i) {
-        if (std::strcmp(argv[i], "--headless") != 0)
+    bool headless = false;
+    for (int i = 1; i < argc; ++i)
+        if (std::strcmp(argv[i], "--headless") == 0)
+            headless = true;
+
+    QStringList rest;
+    for (int j = 0; j < argc; ++j) {
+        if (std::strcmp(argv[j], "--headless") == 0)
             continue;
-        QStringList rest;
-        for (int j = 0; j < argc; ++j) {
-            if (std::strcmp(argv[j], "--headless") == 0)
-                continue;
-            rest.append(QString::fromUtf8(argv[j]));
-        }
+        rest.append(QString::fromUtf8(argv[j]));
+    }
+
+    // A headless run needs no display, but it still needs an event loop:
+    // the index refresh runs a child process and reports back through it.
+    // The application object must exist before any path is resolved, so it
+    // is created here rather than after the headless branch.
+    if (headless) {
+        QCoreApplication app(argc, argv);
+        app.setApplicationName("sipsearch");
         return runHeadless(rest);
     }
 
