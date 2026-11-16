@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=SIP-01 Search
+Comment=Search the decentralized web index
+Exec=sipsearch %f
+Icon=sipsearch
+Terminal=false
+Categories=Utility;Network;
+StartupWMClass=sipsearch
+Keywords=search;nostr;decentralized;sip;index;

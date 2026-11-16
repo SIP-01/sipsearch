@@ -1,0 +1,110 @@
+# SIP-01 Search
+
+A native search engine for the decentralized web, built for Omarchy.
+
+SIP-01 (kind 39697) is a federated web index on Nostr: independent indexers
+observe pages and publish observations to shared relays. Nothing is owned by
+anybody. This app puts that index behind a search box that behaves like any
+other desktop search engine — instant results, keyboard-driven, and following
+the Omarchy theme live.
+
+![SIP-01 Search](screenshot.png)
+
+## What it does
+
+- **Fetches the index.** Pulls every observation from the SIP-01 index relays
+  and keeps them in a local corpus (about 5,000 documents today).
+- **Ranks locally.** Every candidate is re-scored on the document's own text
+  — term frequency, title weight, phrase matches — rather than trusting
+  whatever a relay returned. A candidate that does not match the query is
+  dropped, so the app never shows unrelated pages as answers.
+- **Ranks agreement.** Independent indexers observing the same page is
+  agreement, and the distinct-author count is the core ranking signal of the
+  protocol. Those pages rise.
+- **Answers instantly.** The corpus is cached on disk, so a query never waits
+  on the network, and the app works offline.
+- **Follows the theme.** The Omarchy accent and Hyprland's window rounding
+  are read live, so the app looks like part of the desktop.
+
+## Requirements
+
+- `sip01-search` on `$PATH` — the CLI that owns the protocol. It wraps the
+  audited `sip-01` and `nostr` skills' scripts, so this app never
+  reimplements the wire format.
+- Qt 6 (base, declarative, wayland).
+
+```sh
+hermes skills install SIP-01/sip-01-skill/
+hermes skills install NostrDanish/nostr-skill/
+```
+
+## Build
+
+```sh
+bin/build      # qmake6 + make into build/sipsearch
+bin/test       # the Qt Test binary, offscreen
+bin/install    # makepkg -fsi, so it lands in the app launcher
+```
+
+## Desktop integration
+
+| Surface | How |
+|---|---|
+| App launcher | `bin/install` installs the `.desktop` entry and icon |
+| Keybinding | `Super+Shift+S` → `omarchy-launch-or-focus sipsearch uwsm-app -- sipsearch` |
+| Omarchy menu | the `SIP-01 Search` row under the SIP-01 submenu |
+| Browser | `sip01-register-search-engine` adds Dsearch as a browser search engine |
+
+### As the browser's search engine
+
+Dsearch publishes an OpenSearch descriptor at `https://dsearch.com/opensearch.xml`.
+To make it the default engine in Brave or Chromium:
+
+```sh
+sip01-register-search-engine --default
+```
+
+The browser must be closed first — it rewrites its `Preferences` file on
+exit, so an edit made while it runs is lost. The script says so rather than
+silently losing the change.
+
+## Keyboard
+
+| Key | Action |
+|---|---|
+| `Ctrl+F` | focus the search field |
+| `↓` `↑` | move through the results |
+| `Enter` | open the selected page |
+| `Ctrl+C` | copy the selected URL |
+| `Ctrl+R` | refresh the index |
+| `?` | show the shortcuts |
+| `Q` | quit |
+
+## Layout
+
+```text
+sipsearch.pro           qmake project
+bin/build               build
+bin/test                tests
+bin/install             package and install
+src/main.cpp            app setup
+src/backend.{h,cpp}     the corpus, the ranking, the index refresh
+src/ranker.{h,cpp}      term weighting and phrase matching
+src/theme.{h,cpp}       follows the Omarchy accent and Hyprland rounding
+src/translator.{h,cpp}  follows the Omarchy language
+src/Main.qml            the window
+src/i18n/en.json        English, for the plural forms of counted strings
+pkgbuild/               PKGBUILD, .desktop entry and icon
+tests/                  Qt Test cases
+```
+
+## Protocol
+
+Everything protocol-shaped lives in one place: the `sip-01` and `nostr`
+skills' scripts, reached through the `sip01-search` CLI. This app asks that
+CLI for the corpus and does the ranking itself. It never holds a Nostr key
+and never signs anything — reading the index needs no credentials.
+
+## License
+
+MIT.
