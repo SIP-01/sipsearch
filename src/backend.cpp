@@ -28,7 +28,10 @@ QString searchCli()
 
 QString cacheFile()
 {
-    const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    // Not QStandardPaths::AppDataLocation: that path depends on the
+    // application name, so a headless run would look in a different place
+    // than the window and start from an empty corpus.
+    const QString dir = QDir::homePath() + "/.local/share/sipsearch";
     QDir().mkpath(dir);
     return dir + "/corpus.json";
 }
@@ -116,49 +119,7 @@ void Backend::setQuery(const QString &query)
 
 void Backend::rank()
 {
-    QStringList terms, phrases;
-    Ranker::parse(m_query, terms, phrases);
-
-    struct Scored {
-        double score = 0;
-        int index = 0;
-    };
-
-    QVector<Scored> scored;
-    if (!terms.isEmpty() || !phrases.isEmpty()) {
-        scored.reserve(m_corpus.size());
-        for (int i = 0; i < m_corpus.size(); ++i) {
-            const double value = Ranker::score(m_corpus.at(i), terms, phrases);
-            // A candidate that does not match locally is dropped, even when a
-            // relay returned it. Showing unrelated pages as answers is worse
-            // than showing nothing.
-            if (value <= 0.0)
-                continue;
-            scored.append({value, i});
-        }
-        std::sort(scored.begin(), scored.end(), [](const Scored &a, const Scored &b) {
-            if (a.score != b.score)
-                return a.score > b.score;
-            return a.index < b.index;
-        });
-    }
-
-    m_results.clear();
-    const int limit = 40;
-    for (int i = 0; i < scored.size() && i < limit; ++i) {
-        const IndexDocument &doc = m_corpus.at(scored.at(i).index);
-        QVariantMap row;
-        row["title"] = doc.title;
-        row["url"] = doc.url;
-        row["description"] = doc.description;
-        row["lang"] = doc.lang;
-        row["topics"] = doc.topics;
-        row["indexers"] = doc.indexers;
-        row["score"] = scored.at(i).score;
-        row["id"] = doc.id;
-        m_results.append(row);
-    }
-
+    m_results = search(m_query, 40);
     emit resultsChanged();
 }
 
@@ -280,4 +241,44 @@ void Backend::copyUrl(int index)
     if (url.isEmpty())
         return;
     QGuiApplication::clipboard()->setText(url);
+}
+
+QVariantList Backend::search(const QString &query, int limit) const
+{
+    QStringList terms, phrases;
+    Ranker::parse(query, terms, phrases);
+    struct Scored {
+        double score = 0;
+        int index = 0;
+    };
+
+    QVector<Scored> scored;
+    scored.reserve(m_corpus.size());
+    for (int i = 0; i < m_corpus.size(); ++i) {
+        const double value = Ranker::score(m_corpus.at(i), terms, phrases);
+        if (value <= 0.0)
+            continue;
+        scored.append({value, i});
+    }
+    std::sort(scored.begin(), scored.end(), [](const Scored &a, const Scored &b) {
+        if (a.score != b.score)
+            return a.score > b.score;
+        return a.index < b.index;
+    });
+
+    QVariantList rows;
+    for (int i = 0; i < scored.size() && i < limit; ++i) {
+        const IndexDocument &doc = m_corpus.at(scored.at(i).index);
+        QVariantMap row;
+        row["title"] = doc.title;
+        row["url"] = doc.url;
+        row["description"] = doc.description;
+        row["lang"] = doc.lang;
+        row["topics"] = doc.topics;
+        row["indexers"] = doc.indexers;
+        row["score"] = scored.at(i).score;
+        row["id"] = doc.id;
+        rows.append(row);
+    }
+    return rows;
 }

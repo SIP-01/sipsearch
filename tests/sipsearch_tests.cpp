@@ -101,6 +101,23 @@ private slots:
         QCOMPARE(backend.query(), QString("nostr"));
     }
 
+    void backendSearchMatchesTheWindow()
+    {
+        Backend backend;
+        backend.setQuery("nostr");
+        // The same ranking the window shows, so an agent and a person get
+        // the same answer.
+        QCOMPARE(backend.search("nostr"), backend.results());
+    }
+
+    void backendSearchDropsNonMatches()
+    {
+        Backend backend;
+        backend.setQuery("nostr");
+        // A query that matches nothing returns nothing, never unrelated pages.
+        QCOMPARE(backend.search("zzzznotawordzzzz"), QVariantList());
+    }
+
     void themeFallsBack()
     {
         QTemporaryDir dir;

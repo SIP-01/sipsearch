@@ -42,6 +42,10 @@ public:
     Q_INVOKABLE void openResult(int index);
     Q_INVOKABLE void copyUrl(int index);
 
+    // The same ranking the window shows, as JSON. An agent asks the app the
+    // way a person asks the window, and gets the same answer.
+    Q_INVOKABLE QVariantList search(const QString &query, int limit = 40) const;
+
 signals:
     void queryChanged();
     void statusChanged();
