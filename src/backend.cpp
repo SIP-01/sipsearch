@@ -333,8 +333,13 @@ QVariantList Backend::search(const QString &query, int limit) const
     // The structured query decides what matches; the ranker decides the
     // order. Filters and booleans are enforced here, so a document the
     // query does not actually match can never show up as an answer.
+    //
+    // The engine runs for plain queries too, not just structured ones. A
+    // plain query is an implicit AND: "decentralized index" means a page
+    // about both words, not a page about either. The ranker alone is an
+    // OR — it ranks any page mentioning one of the terms — so skipping the
+    // engine would let "index" match a page about helicopters.
     const Query::Parsed parsed = Query::parse(query);
-    const bool hasStructuredQuery = parsed.hasFilters || parsed.hasBoolean;
 
     struct Scored {
         double score = 0;
@@ -346,18 +351,16 @@ QVariantList Backend::search(const QString &query, int limit) const
     for (int i = 0; i < m_corpus.size(); ++i) {
         const IndexDocument &doc = m_corpus.at(i);
 
-        if (hasStructuredQuery) {
-            Engine::Doc view;
-            view.url = doc.url;
-            view.title = doc.title;
-            view.description = doc.description;
-            view.topics = doc.topics;
-            view.language = doc.lang;
-            view.observedAt = doc.createdAt;
-            const Engine::Evaluation evaluation = Engine::evaluate(parsed, view);
-            if (!evaluation.match)
-                continue;
-        }
+        Engine::Doc view;
+        view.url = doc.url;
+        view.title = doc.title;
+        view.description = doc.description;
+        view.topics = doc.topics;
+        view.language = doc.lang;
+        view.observedAt = doc.createdAt;
+        const Engine::Evaluation evaluation = Engine::evaluate(parsed, view);
+        if (!evaluation.match)
+            continue;
 
         const double value = Ranker::score(doc, terms, phrases);
         if (value <= 0.0)

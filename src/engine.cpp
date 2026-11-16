@@ -10,6 +10,33 @@ namespace Engine {
 
 namespace {
 
+// Words that carry no search signal. They must not become a hard
+// requirement: "index of the pages" is a search for "index", not a
+// search for a page containing the word "of".
+//
+// The list matches Dsearch's STOP_WORDS, so a query means the same
+// thing in both apps.
+const QSet<QString> &stopWords()
+{
+    static const QSet<QString> words{
+        QStringLiteral("a"), QStringLiteral("an"), QStringLiteral("the"),
+        QStringLiteral("and"), QStringLiteral("or"), QStringLiteral("but"),
+        QStringLiteral("of"), QStringLiteral("to"), QStringLiteral("in"),
+        QStringLiteral("on"), QStringLiteral("for"), QStringLiteral("at"),
+        QStringLiteral("by"), QStringLiteral("from"), QStringLiteral("with"),
+        QStringLiteral("is"), QStringLiteral("it"), QStringLiteral("its"),
+        QStringLiteral("as"), QStringLiteral("be"), QStringLiteral("are"),
+        QStringLiteral("was"), QStringLiteral("were"), QStringLiteral("this"),
+        QStringLiteral("that"), QStringLiteral("these"), QStringLiteral("those"),
+        QStringLiteral("what"), QStringLiteral("which"), QStringLiteral("who"),
+        QStringLiteral("how"), QStringLiteral("why"), QStringLiteral("do"),
+        QStringLiteral("does"), QStringLiteral("did"), QStringLiteral("can"),
+        QStringLiteral("could"), QStringLiteral("should"), QStringLiteral("would"),
+        QStringLiteral("will"), QStringLiteral("i"), QStringLiteral("my"),
+    };
+    return words;
+}
+
 // Naive singular folding: "wallets" -> "wallet", "queries" -> "query".
 QString foldPlural(const QString &term)
 {
@@ -283,18 +310,60 @@ Evaluation evaluate(const Query::Parsed &parsed, const Doc &doc)
     } else {
         // Plain query: every meaningful term must match, and a quoted phrase
         // must appear.
+        //
+        // Stop words are not requirements. "index of the pages" is a search
+        // for "index" — requiring the word "of" would return nothing.
+        //
+        // The gutting guard: three or more raw words that reduce to a single
+        // meaningful keyword must also hit one of the other raw words, or a
+        // phrase. Otherwise "how to build a widget" collapses to "widget" and
+        // matches every page about widgets.
+        QStringList allWords;
+        QStringList meaningful;
         for (const QString &term : terms) {
-            if (!evalTerm(term, ctx)) {
+            for (const QString &word : termWords(term)) {
+                if (allWords.contains(word))
+                    continue;
+                allWords.append(word);
+                if (!stopWords().contains(word))
+                    meaningful.append(word);
+            }
+        }
+        const QStringList gateWords = meaningful.isEmpty() ? allWords : meaningful;
+        for (const QString &word : gateWords) {
+            if (!termMatches(ctx.haystack, word)) {
                 matched = false;
                 goto settled;
             }
         }
+
+        bool phraseHit = false;
         for (const QString &phrase : phrases) {
-            if (!evalPhrase(phrase, ctx)) {
+            if (evalPhrase(phrase, ctx)) {
+                phraseHit = true;
+            } else {
                 matched = false;
                 goto settled;
             }
         }
+
+        if (meaningful.size() == 1 && allWords.size() >= 3 && !phraseHit) {
+            const QString &only = meaningful.first();
+            bool secondaryHit = false;
+            for (const QString &word : allWords) {
+                if (word == only)
+                    continue;
+                if (termMatches(ctx.haystack, word)) {
+                    secondaryHit = true;
+                    break;
+                }
+            }
+            if (!secondaryHit) {
+                matched = false;
+                goto settled;
+            }
+        }
+
         // Filters AND into the text gate.
         for (const Query::FilterClause &filter : parsed.filters) {
             const bool satisfied = evalFilter(filter, doc);

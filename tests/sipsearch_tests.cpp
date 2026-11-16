@@ -216,6 +216,62 @@ private slots:
         QVERIFY(Engine::evaluate(parsed, doc).match);
     }
 
+    // --- Plain queries are an implicit AND ---
+
+    void plainQueryRequiresEveryTerm()
+    {
+        Engine::Doc doc;
+        doc.title = QStringLiteral("Disturbance storm time index");
+        doc.description = QStringLiteral("A Wikipedia page about weather.");
+
+        // "index" is present but "decentralized" is not.
+        const auto parsed = Query::parse(QStringLiteral("decentralized index"));
+        QVERIFY(!Engine::evaluate(parsed, doc).match);
+    }
+
+    void plainQueryMatchesWhenEveryTermIsPresent()
+    {
+        Engine::Doc doc;
+        doc.title = QStringLiteral("A decentralized web index");
+        doc.description = QStringLiteral("Search the decentralized index.");
+
+        const auto parsed = Query::parse(QStringLiteral("decentralized index"));
+        QVERIFY(Engine::evaluate(parsed, doc).match);
+    }
+
+    void stopWordsAreNotRequirements()
+    {
+        Engine::Doc doc;
+        doc.title = QStringLiteral("The index of everything");
+        doc.description = QStringLiteral("Pages, sorted.");
+
+        // "of" and "the" carry no signal and must not be required.
+        const auto parsed = Query::parse(QStringLiteral("index of the pages"));
+        QVERIFY(Engine::evaluate(parsed, doc).match);
+    }
+
+    void guttingGuardRejectsAQueryThatCollapsesToOneWord()
+    {
+        Engine::Doc doc;
+        doc.title = QStringLiteral("Widget documentation");
+        doc.description = QStringLiteral("Everything about widgets.");
+
+        // Three raw words reduce to one meaningful keyword. Without the
+        // guard this would match every page about widgets.
+        const auto parsed = Query::parse(QStringLiteral("how to build a widget"));
+        QVERIFY(!Engine::evaluate(parsed, doc).match);
+    }
+
+    void guttingGuardAcceptsWhenASecondaryWordHits()
+    {
+        Engine::Doc doc;
+        doc.title = QStringLiteral("How to build a widget guide");
+        doc.description = QStringLiteral("A step by step guide.");
+
+        const auto parsed = Query::parse(QStringLiteral("how to build a widget"));
+        QVERIFY(Engine::evaluate(parsed, doc).match);
+    }
+
     // --- Instant answers ---
 
     void calculatorAnswersSimpleArithmetic()
