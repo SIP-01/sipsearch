@@ -25,6 +25,20 @@ the Omarchy theme live.
   on the network, and the app works offline.
 - **Follows the theme.** The Omarchy accent and Hyprland's window rounding
   are read live, so the app looks like part of the desktop.
+- **Answers agents too.** `sipsearch --headless <query>` returns the same
+  ranking as JSON, so an agent and a person get the same answer.
+
+## Using it
+
+```sh
+sipsearch                      # open the window
+sipsearch nostr                # open the window already searching for "nostr"
+sipsearch --headless nostr     # JSON on stdout, no window
+sipsearch --headless nostr --limit 5
+```
+
+The headless form exits 1 when nothing matched, so a script can tell "no
+answers" from "the command broke".
 
 ## Requirements
 

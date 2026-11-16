@@ -52,6 +52,21 @@ The signals, in order of weight:
 - `"decentralized index"` — a quoted phrase, matched contiguously.
 - Mixed terms and phrases are allowed in one query.
 
+## Asking the app
+
+```sh
+sipsearch --headless nostr                  # JSON, the window's own ranking
+sipsearch --headless nostr --limit 5
+sipsearch --headless "nostr relays"         # phrase
+sipsearch nostr                             # open the window on a query
+```
+
+The headless form is the same code path the window uses, so an agent and a
+person get the same ranking. It exits 1 when nothing matched.
+
+Use `sip01-search --json <query>` for a live relay query instead: that one
+hits the network, while the app answers from its cached corpus.
+
 ## Refreshing the index
 
 ```sh

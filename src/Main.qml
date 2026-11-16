@@ -58,8 +58,13 @@ ApplicationWindow {
                 id: searchField
                 Layout.fillWidth: true
                 placeholderText: qsTr("Search the decentralized web…")
+                // The field is the source of truth for what the user typed.
+                // A live binding back to the backend would rewrite the text
+                // under the cursor on every keystroke, which drops the last
+                // character. The backend pushes its query in once, at
+                // startup, and after that only the user edits this field.
                 text: backend.query
-                onTextChanged: backend.setQuery(text)
+                onTextEdited: backend.setQuery(text)
                 color: "#e6e6e9"
                 placeholderTextColor: "#6b6b76"
                 font.pixelSize: 17

@@ -107,6 +107,20 @@ int main(int argc, char *argv[]) {
     Theme theme;
     Backend backend;
 
+    // A query on the command line opens the window already searching for
+    // it, the way a search engine handles "firefox --search terms".
+    {
+        QString query;
+        for (int i = 1; i < argc; ++i) {
+            const QString argument = QString::fromUtf8(argv[i]);
+            if (argument.startsWith("--"))
+                continue;
+            query = query.isEmpty() ? argument : query + QLatin1Char(' ') + argument;
+        }
+        if (!query.isEmpty())
+            backend.setQuery(query);
+    }
+
     QQmlApplicationEngine engine;
     QObject::connect(&translator, &Translator::changed, &engine, &QQmlEngine::retranslate);
     engine.rootContext()->setContextProperty("translator", &translator);
