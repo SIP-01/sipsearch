@@ -1,5 +1,10 @@
 #include "backend.h"
 
+#include "engine.h"
+#include "instant.h"
+#include "query.h"
+#include "ranker.h"
+
 #include <QClipboard>
 #include <QDesktopServices>
 #include <QDir>
@@ -115,9 +120,62 @@ void Backend::setQuery(const QString &query)
         return;
     m_query = query;
     m_selected = 0;
+
+    // Parse once here so the chips and the error flag match what the
+    // ranking will actually enforce.
+    const Query::Parsed parsed = Query::parse(query);
+    m_queryHadErrors = parsed.hadErrors;
+    m_queryChips.clear();
+    for (const Query::FilterClause &filter : parsed.filters) {
+        QVariantMap chip;
+        chip["field"] = Query::filterFieldName(filter.field);
+        chip["value"] = filter.value;
+        chip["negated"] = filter.negated;
+        m_queryChips.append(chip);
+    }
+
+    // Some queries are answered outright rather than searched for.
+    m_instantAnswer.clear();
+    const Instant::QueryClass cls = Instant::classifyQuery(query);
+    if (cls == Instant::QueryClass::Math) {
+        double value = 0.0;
+        if (Instant::evaluateMath(query, value)) {
+            m_instantAnswer["kind"] = QStringLiteral("math");
+            m_instantAnswer["title"] = Instant::formatMathResult(value);
+            m_instantAnswer["detail"] = query.trimmed();
+        }
+    } else if (cls == Instant::QueryClass::Url) {
+        const QString url = query.trimmed();
+        m_instantAnswer["kind"] = QStringLiteral("url");
+        m_instantAnswer["title"] = url;
+        m_instantAnswer["detail"] = tr("Is this page in the index?");
+    } else if (cls == Instant::QueryClass::Nip19) {
+        m_instantAnswer["kind"] = QStringLiteral("nip19");
+        m_instantAnswer["title"] = query.trimmed();
+        m_instantAnswer["detail"] = tr("A Nostr entity");
+    } else if (cls == Instant::QueryClass::Nip05) {
+        m_instantAnswer["kind"] = QStringLiteral("nip05");
+        m_instantAnswer["title"] = query.trimmed();
+        m_instantAnswer["detail"] = tr("A NIP-05 address");
+    }
+
     emit queryChanged();
     emit selectedChanged();
     rank();
+}
+
+void Backend::removeFilter(const QString &field, const QString &value)
+{
+    // Drop the matching "field:value" token and leave everything else.
+    const QString needle = field + QLatin1Char(':') + value;
+    QStringList kept;
+    const QStringList parts = m_query.split(QLatin1Char(' '), Qt::SkipEmptyParts);
+    for (const QString &part : parts) {
+        if (part.compare(needle, Qt::CaseInsensitive) == 0)
+            continue;
+        kept.append(part);
+    }
+    setQuery(kept.join(QLatin1Char(' ')));
 }
 
 void Backend::rank()
@@ -263,6 +321,13 @@ QVariantList Backend::search(const QString &query, int limit) const
 {
     QStringList terms, phrases;
     Ranker::parse(query, terms, phrases);
+
+    // The structured query decides what matches; the ranker decides the
+    // order. Filters and booleans are enforced here, so a document the
+    // query does not actually match can never show up as an answer.
+    const Query::Parsed parsed = Query::parse(query);
+    const bool hasStructuredQuery = parsed.hasFilters || parsed.hasBoolean;
+
     struct Scored {
         double score = 0;
         int index = 0;
@@ -271,7 +336,22 @@ QVariantList Backend::search(const QString &query, int limit) const
     QVector<Scored> scored;
     scored.reserve(m_corpus.size());
     for (int i = 0; i < m_corpus.size(); ++i) {
-        const double value = Ranker::score(m_corpus.at(i), terms, phrases);
+        const IndexDocument &doc = m_corpus.at(i);
+
+        if (hasStructuredQuery) {
+            Engine::Doc view;
+            view.url = doc.url;
+            view.title = doc.title;
+            view.description = doc.description;
+            view.topics = doc.topics;
+            view.language = doc.lang;
+            view.observedAt = doc.createdAt;
+            const Engine::Evaluation evaluation = Engine::evaluate(parsed, view);
+            if (!evaluation.match)
+                continue;
+        }
+
+        const double value = Ranker::score(doc, terms, phrases);
         if (value <= 0.0)
             continue;
         scored.append({value, i});

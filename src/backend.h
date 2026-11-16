@@ -23,6 +23,13 @@ class Backend : public QObject {
     Q_PROPERTY(int totalDocuments READ totalDocuments NOTIFY resultsChanged)
     Q_PROPERTY(bool busy READ busy NOTIFY statusChanged)
     Q_PROPERTY(int selected READ selected WRITE setSelected NOTIFY selectedChanged)
+    // The parsed query's filters, as chips: {field, value, negated}.
+    Q_PROPERTY(QVariantList queryChips READ queryChips NOTIFY queryChanged)
+    // True when the query has a problem the user should know about.
+    Q_PROPERTY(bool queryHasError READ queryHasError NOTIFY queryChanged)
+    // The instant answer for the query, when there is one: {kind, title,
+    // detail}. Empty otherwise.
+    Q_PROPERTY(QVariantMap instantAnswer READ instantAnswer NOTIFY queryChanged)
 
 public:
     explicit Backend(QObject *parent = nullptr);
@@ -31,6 +38,9 @@ public:
     QString query() const { return m_query; }
     QString status() const { return m_status; }
     QVariantList results() const { return m_results; }
+    QVariantList queryChips() const { return m_queryChips; }
+    bool queryHasError() const { return m_queryHadErrors; }
+    QVariantMap instantAnswer() const { return m_instantAnswer; }
     int totalDocuments() const { return m_corpus.size(); }
     bool busy() const { return m_busy; }
     int selected() const { return m_selected; }
@@ -41,6 +51,8 @@ public:
     Q_INVOKABLE void openSelected();
     Q_INVOKABLE void openResult(int index);
     Q_INVOKABLE void copyUrl(int index);
+    // Remove one filter from the query, leaving the rest intact.
+    Q_INVOKABLE void removeFilter(const QString &field, const QString &value);
 
     // The same ranking the window shows, as JSON. An agent asks the app the
     // way a person asks the window, and gets the same answer.
@@ -62,10 +74,13 @@ private:
 
     QVector<IndexDocument> m_corpus;
     QVariantList m_results;
+    QVariantList m_queryChips;
+    QVariantMap m_instantAnswer;
     QByteArray m_output;
     QString m_query;
     QString m_status;
     int m_selected = 0;
     bool m_busy = false;
+    bool m_queryHadErrors = false;
     QProcess *m_process = nullptr;
 };

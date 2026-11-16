@@ -4,6 +4,9 @@
 #include <QtTest>
 
 #include "backend.h"
+#include "engine.h"
+#include "instant.h"
+#include "query.h"
 #include "ranker.h"
 #include "theme.h"
 #include "translator.h"
@@ -12,6 +15,289 @@ class SipsearchTests : public QObject {
     Q_OBJECT
 
 private slots:
+    // --- Structured query parsing ---
+
+    void queryParsesLooseTerms()
+    {
+        const auto parsed = Query::parse(QStringLiteral("nostr relays"));
+        QVERIFY(parsed.hasExpr);
+        QVERIFY(!parsed.hasBoolean);
+        QVERIFY(!parsed.hasFilters);
+
+        QStringList terms, phrases;
+        Query::collectTextLeaves(parsed.expr, terms, phrases);
+        QCOMPARE(terms.size(), 2);
+        QCOMPARE(terms.at(0), QStringLiteral("nostr"));
+    }
+
+    void queryParsesAQuotedPhrase()
+    {
+        const auto parsed = Query::parse(QStringLiteral("\"decentralized index\""));
+        QVERIFY(parsed.hasPhrases);
+
+        QStringList terms, phrases;
+        Query::collectTextLeaves(parsed.expr, terms, phrases);
+        QCOMPARE(phrases.size(), 1);
+        QCOMPARE(phrases.at(0), QStringLiteral("decentralized index"));
+    }
+
+    void queryKeepsLowercaseWordsAsTerms()
+    {
+        // "and" in lowercase is an ordinary word, not an operator.
+        const auto parsed = Query::parse(QStringLiteral("rock and roll"));
+        QVERIFY(!parsed.hasBoolean);
+
+        QStringList terms, phrases;
+        Query::collectTextLeaves(parsed.expr, terms, phrases);
+        QCOMPARE(terms.size(), 3);
+    }
+
+    void queryParsesExplicitBoolean()
+    {
+        const auto parsed = Query::parse(QStringLiteral("nostr AND relays"));
+        QVERIFY(parsed.hasBoolean);
+    }
+
+    void queryParsesAFilter()
+    {
+        const auto parsed = Query::parse(QStringLiteral("nostr site:github.com"));
+        QVERIFY(parsed.hasFilters);
+        QCOMPARE(parsed.filters.size(), 1);
+        QCOMPARE(parsed.filters.at(0).field, Query::FilterField::Site);
+        QCOMPARE(parsed.filters.at(0).value, QStringLiteral("github.com"));
+    }
+
+    void queryParsesEveryFilterField()
+    {
+        const QStringList fields{"site", "domain", "title", "type", "lang", "tag", "before", "after"};
+        for (const QString &field : fields) {
+            const auto parsed = Query::parse(field + QStringLiteral(":value"));
+            QVERIFY2(parsed.hasFilters, qPrintable(field));
+            QCOMPARE(parsed.filters.size(), 1);
+        }
+    }
+
+    void queryTreatsAnUnknownFieldAsText()
+    {
+        // A URL is not a filter — the whole token stays text.
+        const auto parsed = Query::parse(QStringLiteral("https://example.com"));
+        QVERIFY(!parsed.hasFilters);
+
+        QStringList terms, phrases;
+        Query::collectTextLeaves(parsed.expr, terms, phrases);
+        QCOMPARE(terms.size(), 1);
+        QCOMPARE(terms.at(0), QStringLiteral("https://example.com"));
+    }
+
+    void querySurvivesMalformedInput()
+    {
+        // It must never throw, and it must still produce something useful.
+        const auto parsed = Query::parse(QStringLiteral("nostr AND site: (unclosed \"quote"));
+        QVERIFY(parsed.hadErrors);
+    }
+
+    // --- Filter evaluation ---
+
+    void filterMatchesASubdomainOfSite()
+    {
+        Engine::Doc doc;
+        doc.url = QStringLiteral("https://gist.github.com/notes/1");
+
+        Query::FilterClause clause{Query::FilterField::Site, QStringLiteral("github.com"), false};
+        QVERIFY(Engine::evalFilter(clause, doc));
+
+        clause.field = Query::FilterField::Domain;
+        QVERIFY(!Engine::evalFilter(clause, doc));
+    }
+
+    void filterDoesNotMatchALookalikeHost()
+    {
+        Engine::Doc doc;
+        doc.url = QStringLiteral("https://evilgithub.com/x");
+
+        Query::FilterClause clause{Query::FilterField::Site, QStringLiteral("github.com"), false};
+        QVERIFY(!Engine::evalFilter(clause, doc));
+    }
+
+    void filterMatchesLanguage()
+    {
+        Engine::Doc doc;
+        doc.language = QStringLiteral("en");
+
+        Query::FilterClause clause{Query::FilterField::Lang, QStringLiteral("en"), false};
+        QVERIFY(Engine::evalFilter(clause, doc));
+
+        clause.value = QStringLiteral("de");
+        QVERIFY(!Engine::evalFilter(clause, doc));
+    }
+
+    void filterPassesAnUnknownLanguage()
+    {
+        // Most indexers do not tag a language, so an unknown one passes.
+        Engine::Doc doc;
+        Query::FilterClause clause{Query::FilterField::Lang, QStringLiteral("de"), false};
+        QVERIFY(Engine::evalFilter(clause, doc));
+    }
+
+    void filterMatchesAnExactTag()
+    {
+        Engine::Doc doc;
+        doc.topics = QStringList{"nostr-tools"};
+
+        Query::FilterClause clause{Query::FilterField::Tag, QStringLiteral("nostr"), false};
+        QVERIFY(!Engine::evalFilter(clause, doc));
+
+        clause.value = QStringLiteral("nostr-tools");
+        QVERIFY(Engine::evalFilter(clause, doc));
+    }
+
+    void filterMatchesATitlePhrase()
+    {
+        Engine::Doc doc;
+        doc.title = QStringLiteral("The Nostr Relay Handbook");
+
+        Query::FilterClause clause{Query::FilterField::Title, QStringLiteral("nostr relay"), false};
+        QVERIFY(Engine::evalFilter(clause, doc));
+
+        clause.value = QStringLiteral("bitcoin");
+        QVERIFY(!Engine::evalFilter(clause, doc));
+    }
+
+    void filterComparesDates()
+    {
+        Engine::Doc doc;
+        doc.observedAt = 1767225600; // 2026-01-01
+
+        Query::FilterClause clause{Query::FilterField::After, QStringLiteral("2025-01-01"), false};
+        QVERIFY(Engine::evalFilter(clause, doc));
+
+        clause.field = Query::FilterField::Before;
+        clause.value = QStringLiteral("2025-01-01");
+        QVERIFY(!Engine::evalFilter(clause, doc));
+    }
+
+    void filterTreatsAnInvalidDateAsANoOp()
+    {
+        Engine::Doc doc;
+        doc.observedAt = 1767225600;
+
+        Query::FilterClause clause{Query::FilterField::After, QStringLiteral("not-a-date"), false};
+        QVERIFY(Engine::evalFilter(clause, doc));
+    }
+
+    void evaluationGatesOnAFilter()
+    {
+        Engine::Doc doc;
+        doc.url = QStringLiteral("https://example.com/nostr");
+        doc.title = QStringLiteral("Nostr notes");
+
+        const auto parsed = Query::parse(QStringLiteral("nostr site:github.com"));
+        QVERIFY(!Engine::evaluate(parsed, doc).match);
+
+        const auto allowed = Query::parse(QStringLiteral("nostr site:example.com"));
+        QVERIFY(Engine::evaluate(allowed, doc).match);
+    }
+
+    void evaluationHonoursNot()
+    {
+        Engine::Doc doc;
+        doc.title = QStringLiteral("Nostr relay directory");
+
+        const auto parsed = Query::parse(QStringLiteral("nostr NOT directory"));
+        QVERIFY(!Engine::evaluate(parsed, doc).match);
+    }
+
+    void evaluationHonoursOr()
+    {
+        Engine::Doc doc;
+        doc.title = QStringLiteral("A relay directory");
+
+        const auto parsed = Query::parse(QStringLiteral("nostr OR relay"));
+        QVERIFY(Engine::evaluate(parsed, doc).match);
+    }
+
+    // --- Instant answers ---
+
+    void calculatorAnswersSimpleArithmetic()
+    {
+        double value = 0.0;
+        QVERIFY(Instant::evaluateMath(QStringLiteral("2 + 2"), value));
+        QCOMPARE(value, 4.0);
+    }
+
+    void calculatorHonoursPrecedenceAndParens()
+    {
+        double value = 0.0;
+        QVERIFY(Instant::evaluateMath(QStringLiteral("(3 + 4) * 5"), value));
+        QCOMPARE(value, 35.0);
+
+        QVERIFY(Instant::evaluateMath(QStringLiteral("2 + 3 * 4"), value));
+        QCOMPARE(value, 14.0);
+    }
+
+    void calculatorHandlesPower()
+    {
+        double value = 0.0;
+        QVERIFY(Instant::evaluateMath(QStringLiteral("2^10"), value));
+        QCOMPARE(value, 1024.0);
+    }
+
+    void calculatorHandlesPercentOf()
+    {
+        double value = 0.0;
+        QVERIFY(Instant::evaluateMath(QStringLiteral("15% of 80"), value));
+        QCOMPARE(value, 12.0);
+    }
+
+    void calculatorHandlesTypedOperatorSymbols()
+    {
+        double value = 0.0;
+        QVERIFY(Instant::evaluateMath(QStringLiteral("1+2-8×5"), value));
+        QCOMPARE(value, -37.0);
+
+        QVERIFY(Instant::evaluateMath(QStringLiteral("8x5"), value));
+        QCOMPARE(value, 40.0);
+    }
+
+    void calculatorRefusesDivisionByZero()
+    {
+        double value = 0.0;
+        QVERIFY(!Instant::evaluateMath(QStringLiteral("1 / 0"), value));
+    }
+
+    void calculatorRefusesNonArithmetic()
+    {
+        double value = 0.0;
+        QVERIFY(!Instant::evaluateMath(QStringLiteral("nostr relays"), value));
+        QVERIFY(!Instant::evaluateMath(QStringLiteral("2 +"), value));
+    }
+
+    void calculatorFormatsResults()
+    {
+        QCOMPARE(Instant::formatMathResult(1234567.0), QStringLiteral("1,234,567"));
+        QCOMPARE(Instant::formatMathResult(42.0), QStringLiteral("42"));
+        QCOMPARE(Instant::formatMathResult(0.1 + 0.2), QStringLiteral("0.3"));
+    }
+
+    void classifierSortsQueryKinds()
+    {
+        QCOMPARE(Instant::classifyQuery(QStringLiteral("2 + 2")),
+                 Instant::QueryClass::Math);
+        QCOMPARE(Instant::classifyQuery(QStringLiteral("https://example.com/page")),
+                 Instant::QueryClass::Url);
+        QCOMPARE(Instant::classifyQuery(QStringLiteral("name@example.com")),
+                 Instant::QueryClass::Nip05);
+        QCOMPARE(Instant::classifyQuery(QStringLiteral("nostr relays")),
+                 Instant::QueryClass::Text);
+    }
+
+    void classifierKeepsABareDomainAsText()
+    {
+        // Searching "wikipedia.org" should still run the search.
+        QCOMPARE(Instant::classifyQuery(QStringLiteral("wikipedia.org")),
+                 Instant::QueryClass::Text);
+    }
+
     void rankerFindsTermsInTitle()
     {
         IndexDocument doc;

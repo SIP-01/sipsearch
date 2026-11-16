@@ -39,6 +39,9 @@ int runHeadless(const QStringList &arguments)
     }
 
     Backend backend;
+    // The query is set on the backend so the instant answer and the filter
+    // chips are built the same way the window builds them.
+    backend.setQuery(query);
     if (refresh || backend.totalDocuments() == 0) {
         backend.refresh();
         // The refresh runs a child process and reports back through the
@@ -54,13 +57,18 @@ int runHeadless(const QStringList &arguments)
     QJsonArray out;
     for (const auto &row : rows)
         out.append(QJsonObject::fromVariantMap(row.toMap()));
-    const QJsonObject result{
+    QJsonObject document{
         {"query", query},
         {"total_documents", backend.totalDocuments()},
         {"hits", out},
     };
-    std::printf("%s\n", QJsonDocument(result).toJson(QJsonDocument::Compact).constData());
-    return rows.isEmpty() ? 1 : 0;
+    // The instant answer, when the query has one — an agent should get it
+    // too, not just the person looking at the window.
+    const QVariantMap instant = backend.instantAnswer();
+    if (!instant.isEmpty())
+        document.insert("instant_answer", QJsonObject::fromVariantMap(instant));
+    std::printf("%s\n", QJsonDocument(document).toJson(QJsonDocument::Compact).constData());
+    return rows.isEmpty() && instant.isEmpty() ? 1 : 0;
 }
 
 } // namespace

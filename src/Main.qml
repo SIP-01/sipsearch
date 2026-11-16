@@ -87,6 +87,80 @@ ApplicationWindow {
                 Keys.onEscapePressed: searchField.text = ""
             }
 
+            // The instant answer: shown when the query is answered outright
+            // rather than searched for.
+            Rectangle {
+                Layout.fillWidth: true
+                visible: backend.instantAnswer.title !== undefined
+                         && backend.instantAnswer.title !== ""
+                height: visible ? 56 : 0
+                radius: Math.min(8, theme.radius)
+                color: "#152024"
+                border.width: 1
+                border.color: "#2c444c"
+
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.leftMargin: 14
+                    anchors.rightMargin: 14
+                    spacing: 12
+
+                    Text {
+                        text: backend.instantAnswer.title || ""
+                        color: "#d8f3f5"
+                        font.pixelSize: 22
+                        elide: Text.ElideRight
+                        Layout.fillWidth: true
+                    }
+
+                    Text {
+                        text: backend.instantAnswer.detail || ""
+                        color: "#7fa8ad"
+                        font.pixelSize: 11
+                        elide: Text.ElideRight
+                    }
+                }
+            }
+
+            // The filter chips: the structured part of the query, shown so
+            // the user can see what is being enforced and drop one.
+            Flow {
+                Layout.fillWidth: true
+                visible: backend.queryChips.length > 0
+                spacing: 6
+
+                Repeater {
+                    model: backend.queryChips
+
+                    delegate: Rectangle {
+                        required property var modelData
+
+                        width: label.implicitWidth + 26
+                        height: 24
+                        radius: 12
+                        color: modelData.negated ? "#3a1f24" : "#1e2a2e"
+                        border.width: 1
+                        border.color: modelData.negated ? "#7a3a44" : "#2c444c"
+
+                        Text {
+                            id: label
+                            anchors.centerIn: parent
+                            text: (modelData.negated ? "−" : "") + modelData.field + ":" + modelData.value
+                            color: modelData.negated ? "#e39aa5" : "#8fd3d8"
+                            font.pixelSize: 11
+                        }
+
+                        TapHandler {
+                            onTapped: backend.removeFilter(modelData.field, modelData.value)
+                        }
+
+                        ToolTip.visible: chipHover.hovered
+                        ToolTip.text: qsTr("Remove this filter")
+                        HoverHandler { id: chipHover }
+                    }
+                }
+            }
+
             // The status line: what the index holds and where it came from.
             RowLayout {
                 Layout.fillWidth: true
