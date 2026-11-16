@@ -35,9 +35,16 @@ rules below are Dsearch's, so a query means the same thing in either.
 
 **Text and phrases**
 
-- `nostr relays` — loose terms, matched as whole words.
+- `nostr relays` — loose terms, matched as whole words. A loose query is an
+  implicit AND: both words must appear. `decentralized index` means a page
+  about both, not a page about either.
 - `"decentralized index"` — a quoted phrase, matched contiguously.
 - `rock and roll` — lowercase `and` is an ordinary word, not an operator.
+
+Common words carry no signal and are never required: `index of the pages`
+looks for `index` and `pages`, not for the word `of`. But a query that
+collapses to a single keyword still has to hit something else — `how to
+build a widget` will not match every page about widgets.
 
 **Boolean operators** — uppercase only, precedence `NOT` > `AND` > `OR`:
 

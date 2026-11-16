@@ -48,9 +48,16 @@ The signals, in order of weight:
 
 ## Query syntax
 
-- `nostr` — loose terms, matched as whole words.
+- `nostr` — loose terms, matched as whole words. A loose query is an
+  implicit AND: `decentralized index` means a page about both words, not
+  a page about either.
 - `"decentralized index"` — a quoted phrase, matched contiguously.
 - Mixed terms and phrases are allowed in one query.
+
+**Stop words** — common words carry no signal and are never required.
+`index of the pages` looks for `index` and `pages`, not for the word `of`.
+A query that collapses to a single keyword still has to hit something
+else, so `how to build a widget` will not match every page about widgets.
 
 **Boolean** — uppercase only, precedence `NOT` > `AND` > `OR`:
 
@@ -152,3 +159,11 @@ observations still goes through a dedicated signer, never through this app.
   blocks writing and never finishes.
 - The ranker must return zero when nothing matched. An indexer-agreement
   bonus applied to a non-matching document turns unrelated pages into results.
+- The ranker alone is an OR. It can order candidates but it cannot decide
+  what matches — only the engine can. Running the engine only for queries
+  with filters or booleans lets a plain query match on one word alone.
+- Stop words must be filtered before the gate, not after. Requiring "of" to
+  appear turns a normal query into an empty result set.
+- A hash covers the text as observed, not as displayed. Strip HTML or
+  collapse whitespace before hashing and every observation with markup
+  fails verification — see the `sip-01-observation-verification` skill.
