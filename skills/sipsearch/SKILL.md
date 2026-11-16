@@ -52,6 +52,30 @@ The signals, in order of weight:
 - `"decentralized index"` — a quoted phrase, matched contiguously.
 - Mixed terms and phrases are allowed in one query.
 
+**Boolean** — uppercase only, precedence `NOT` > `AND` > `OR`:
+
+- `nostr AND relays`, `nostr OR bitcoin`, `nostr NOT directory`
+- `(nostr OR nostrich) AND relays`
+- Lowercase `and` stays an ordinary word, so `rock and roll` is not mangled.
+
+**Filters** — evaluated against the document's metadata, never its text:
+
+| Filter | Meaning |
+|---|---|
+| `site:github.com` | the host or a subdomain of it |
+| `domain:github.com` | the host exactly |
+| `title:relay` | the term is in the title |
+| `type:pdf` | the document type or mime tail |
+| `lang:de` | the ISO 639-1 language tag |
+| `tag:nostr` | an exact topic tag |
+| `before:2026-01-01` / `after:2026-01-01` | date bounds |
+
+`site:` matches a subdomain but never a lookalike host. Filters show as
+chips under the search field; clicking one drops it.
+
+**Instant answers** — arithmetic, URLs, NIP-19 and NIP-05 are answered
+outright. The answer is in the headless JSON too, under `instant_answer`.
+
 ## Asking the app
 
 ```sh

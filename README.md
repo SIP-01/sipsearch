@@ -28,6 +28,45 @@ the Omarchy theme live.
 - **Answers agents too.** `sipsearch --headless <query>` returns the same
   ranking as JSON, so an agent and a person get the same answer.
 
+## Query syntax
+
+The app understands what a search engine is expected to understand. The
+rules below are Dsearch's, so a query means the same thing in either.
+
+**Text and phrases**
+
+- `nostr relays` — loose terms, matched as whole words.
+- `"decentralized index"` — a quoted phrase, matched contiguously.
+- `rock and roll` — lowercase `and` is an ordinary word, not an operator.
+
+**Boolean operators** — uppercase only, precedence `NOT` > `AND` > `OR`:
+
+- `nostr AND relays`
+- `nostr OR bitcoin`
+- `nostr NOT directory`
+- `(nostr OR nostrich) AND relays`
+
+**Field filters** — evaluated against the document's metadata, not its text:
+
+| Filter | Meaning |
+|---|---|
+| `site:github.com` | the host is that domain or a subdomain of it |
+| `domain:github.com` | the host is exactly that domain |
+| `title:relay` | the term appears in the title |
+| `type:pdf` | the document type or mime tail |
+| `lang:de` | the ISO 639-1 language tag |
+| `tag:nostr` | an exact topic tag — `tag:nostr` does not match `nostr-tools` |
+| `before:2026-01-01` | strictly before that day |
+| `after:2026-01-01` | on or after that day |
+
+`site:github.com` matches `gist.github.com` but never `evilgithub.com`.
+
+Filters show up as chips under the search field. Click one to drop it.
+
+**Instant answers** — some queries are answered outright instead of being
+searched for: arithmetic (`2+2`, `(3+4)*5`, `2^10`, `15% of 80`), URLs,
+NIP-19 entities and NIP-05 addresses.
+
 ## Using it
 
 ```sh
