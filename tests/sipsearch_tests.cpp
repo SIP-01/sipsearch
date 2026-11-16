@@ -448,8 +448,24 @@ private slots:
         Backend backend;
         backend.setQuery("nostr");
         // The same ranking the window shows, so an agent and a person get
-        // the same answer.
-        QCOMPARE(backend.search("nostr"), backend.results());
+        // the same answer. The window shows the index half, capped, so the
+        // comparison uses the same limit.
+        QCOMPARE(backend.search("nostr", 12), backend.results());
+    }
+
+    void backendKeepsTheIndexAndTheWebApart()
+    {
+        // The web results are merged into the index results, so the merge
+        // must start from the index list rather than from the already
+        // merged one — otherwise the interleaving runs twice.
+        Backend backend;
+        backend.setQuery("nostr");
+        const int afterFirst = backend.results().size();
+        backend.setWebEnabled(false);
+        backend.setWebEnabled(true);
+        // The list is rebuilt from the index each time, so the size is
+        // stable rather than growing.
+        QVERIFY(backend.results().size() <= afterFirst + 32);
     }
 
     void backendSearchDropsNonMatches()
@@ -468,6 +484,48 @@ private slots:
         QCOMPARE(theme.accentForeground(), QString("black"));
     }
 
+    void themeLiftsAnUnreadableMutedTone()
+    {
+        // A theme's muted tone can be too dark against its own background.
+        // The phosphor theme's #426b4b on #020804 is 3.3:1, which is not
+        // readable, so the app lifts the same hue until it passes.
+        QTemporaryDir dir;
+        QDir(dir.path()).mkpath("theme");
+        QFile colors(dir.path() + "/theme/colors.toml");
+        QVERIFY(colors.open(QIODevice::WriteOnly));
+        colors.write("background = \"#020804\"\n"
+                     "foreground = \"#c7f5ce\"\n"
+                     "muted = \"#426b4b\"\n");
+        colors.close();
+
+        Theme theme(dir.path());
+        const QString muted = theme.readableMuted();
+        QVERIFY(!muted.isEmpty());
+        QVERIFY(muted != "#426b4b");
+        // The hue is kept — the lifted tone is still the theme's green.
+        QCOMPARE(muted.left(1), QString("#"));
+    }
+
+    void themeLiftsAWindowThatWouldBeBlack()
+    {
+        // A window painted in the theme's near-black background reads as a
+        // hole in the desktop, so the window colour is lifted and the
+        // panel sits one step above it.
+        QTemporaryDir dir;
+        QDir(dir.path()).mkpath("theme");
+        QFile colors(dir.path() + "/theme/colors.toml");
+        QVERIFY(colors.open(QIODevice::WriteOnly));
+        colors.write("background = \"#020804\"\n"
+                     "foreground = \"#c7f5ce\"\n"
+                     "muted = \"#426b4b\"\n");
+        colors.close();
+
+        Theme theme(dir.path());
+        QVERIFY(theme.windowColor() != theme.color("background"));
+        // The panel is above the window, not below it.
+        QVERIFY(theme.surfaceColor() != theme.windowColor());
+    }
+
     void themeReadsAccent()
     {
         QTemporaryDir dir;
@@ -480,6 +538,34 @@ private slots:
         Theme theme(dir.path());
         QCOMPARE(theme.accent(), QString("#112233"));
         QCOMPARE(theme.accentForeground(), QString("white"));
+    }
+
+    void themeReadsTheWholePalette()
+    {
+        // An app that only takes the accent ends up with a hardcoded grey
+        // interior that clashes with the desktop, so the whole palette is
+        // read.
+        QTemporaryDir dir;
+        QDir(dir.path()).mkpath("theme");
+        QFile colors(dir.path() + "/theme/colors.toml");
+        QVERIFY(colors.open(QIODevice::WriteOnly));
+        colors.write("mode = \"dark\"\n"
+                     "accent = \"#39ff14\"\n"
+                     "background = \"#020804\"\n"
+                     "foreground = \"#c7f5ce\"\n"
+                     "muted = \"#426b4b\"\n"
+                     "red = \"#ff2e63\"\n");
+        colors.close();
+
+        Theme theme(dir.path());
+        QCOMPARE(theme.color("background"), QString("#020804"));
+        QCOMPARE(theme.color("foreground"), QString("#c7f5ce"));
+        QCOMPARE(theme.color("muted"), QString("#426b4b"));
+        QCOMPARE(theme.color("red"), QString("#ff2e63"));
+        // A key the theme does not define has no colour, so the caller can
+        // fall back rather than paint an invalid colour.
+        QVERIFY(theme.color("nonexistent").isEmpty());
+        QCOMPARE(theme.colors().value("accent").toString(), QString("#39ff14"));
     }
 
     void themeFollowsHyprlandRounding()

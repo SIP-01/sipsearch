@@ -20,6 +20,12 @@
 
 namespace {
 
+// How many results each half of the search may contribute. The index
+// keeps the lead, but neither half may crowd out the other — an index that
+// fills every slot with a weak match would hide the engines entirely.
+constexpr int kIndexResultLimit = 12;
+constexpr int kWebResultLimit = 20;
+
 // The CLI that owns the protocol. It wraps the audited sip-01 and nostr
 // skill scripts, so the app never reimplements the wire format.
 QString searchCli()
@@ -60,6 +66,10 @@ Backend::~Backend()
     if (m_process && m_process->state() != QProcess::NotRunning) {
         m_process->kill();
         m_process->waitForFinished(1000);
+    }
+    if (m_webProcess && m_webProcess->state() != QProcess::NotRunning) {
+        m_webProcess->kill();
+        m_webProcess->waitForFinished(1000);
     }
 }
 
@@ -161,7 +171,9 @@ void Backend::setQuery(const QString &query)
 
     emit queryChanged();
     emit selectedChanged();
+    m_source.clear();
     rank();
+    searchWeb();
 }
 
 void Backend::removeFilter(const QString &field, const QString &value)
@@ -180,8 +192,153 @@ void Backend::removeFilter(const QString &field, const QString &value)
 
 void Backend::rank()
 {
-    m_results = search(m_query, 40);
+    m_indexResults = search(m_query, kIndexResultLimit);
+    m_results = m_indexResults;
     emit resultsChanged();
+}
+
+void Backend::setWebEnabled(bool enabled)
+{
+    if (m_webEnabled == enabled)
+        return;
+    m_webEnabled = enabled;
+    emit webEnabledChanged();
+    // Turning the web off drops the web results; turning it on adds them.
+    m_source.clear();
+    rank();
+    if (enabled)
+        searchWeb();
+    else
+        m_engines.clear();
+}
+
+// The federation helper. It runs Dsearch's provider layer in Node and
+// returns merged web results as JSON.
+QString federationHelper()
+{
+    const QString custom = qEnvironmentVariable("SIPSEARCH_FED");
+    if (!custom.isEmpty())
+        return custom;
+    return QDir::homePath() + "/.local/bin/sipsearch-fed";
+}
+
+void Backend::searchWeb()
+{
+    if (!m_webEnabled || m_query.trimmed().isEmpty())
+        return;
+    if (m_webProcess && m_webProcess->state() != QProcess::NotRunning)
+        return;
+
+    const QString helper = federationHelper();
+    if (!QFile::exists(helper)) {
+        // No helper installed: the index still works, so say so quietly in
+        // the engine chips rather than failing the search.
+        m_engines.clear();
+        emit resultsChanged();
+        return;
+    }
+
+    m_searching = true;
+    m_webOutput.clear();
+    emit statusChanged();
+
+    if (!m_webProcess) {
+        m_webProcess = new QProcess(this);
+        connect(m_webProcess, &QProcess::readyReadStandardOutput, this, [this] {
+            m_webOutput += m_webProcess->readAllStandardOutput();
+        });
+        connect(m_webProcess, &QProcess::finished, this,
+                [this](int code, QProcess::ExitStatus status) { onWebFinished(code, status); });
+        connect(m_webProcess, &QProcess::errorOccurred, this,
+                [this](QProcess::ProcessError error) { onWebError(error); });
+    }
+
+    const QStringList args{QStringLiteral("--json"), QStringLiteral("--limit=20"), m_query};
+    m_webProcess->start(helper, args);
+}
+
+void Backend::onWebFinished(int code, QProcess::ExitStatus status)
+{
+    m_searching = false;
+    if (code != 0 || status != QProcess::NormalExit) {
+        emit statusChanged();
+        return;
+    }
+
+    const QByteArray output = m_webOutput.isEmpty() ? m_webProcess->readAllStandardOutput() : m_webOutput;
+    m_webOutput.clear();
+
+    const QJsonObject root = QJsonDocument::fromJson(output).object();
+    const QJsonArray rows = root.value("results").toArray();
+
+    m_engines.clear();
+    const QJsonArray engines = root.value("providers").toArray();
+    for (const auto &engine : engines) {
+        const QJsonObject object = engine.toObject();
+        QVariantMap chip;
+        chip["id"] = object.value("id").toString();
+        chip["count"] = object.value("count").toInt();
+        chip["ok"] = object.value("ok").toBool();
+        m_engines.append(chip);
+    }
+
+    // The web results compete with the index rather than queueing behind
+    // it. The index alone can fill every slot with a weak match, which
+    // would hide the engines' answers entirely — and the engines are the
+    // part that makes the app usable while the index is still young.
+    //
+    // The index keeps the lead: it is the decentralized part, and the part
+    // that is verified. Then the two halves alternate, so scrolling shows
+    // both rather than a wall of one.
+    if (!rows.isEmpty()) {
+        QVariantList index = m_indexResults.mid(0, kIndexResultLimit);
+        QVariantList web;
+        for (const auto &row : rows) {
+            const QJsonObject object = row.toObject();
+            QVariantMap result;
+            result["title"] = object.value("title").toString();
+            result["url"] = object.value("url").toString();
+            result["description"] = object.value("snippet").toString();
+            result["lang"] = QString();
+            result["d"] = object.value("url").toString();
+            result["indexers"] = 0;
+            result["engine"] = object.value("engine").toString();
+            result["provider"] = object.value("provider").toString();
+            result["web"] = true;
+            web.append(result);
+        }
+        web = web.mid(0, kWebResultLimit);
+
+        QVariantList merged;
+        int indexAt = 0, webAt = 0;
+        while (indexAt < index.size() || webAt < web.size()) {
+            // Two index results, then one web result. The index keeps the
+            // lead without burying the engines.
+            for (int i = 0; i < 2 && indexAt < index.size(); ++i)
+                merged.append(index.at(indexAt++));
+            if (webAt < web.size())
+                merged.append(web.at(webAt++));
+        }
+        m_results = merged;
+        m_source = m_source == QLatin1String("index") ? QStringLiteral("both")
+                                                      : QStringLiteral("web");
+    } else if (m_source.isEmpty()) {
+        m_source = QStringLiteral("index");
+    }
+
+    emit resultsChanged();
+    emit statusChanged();
+}
+
+void Backend::onWebError(QProcess::ProcessError error)
+{
+    m_searching = false;
+    if (error == QProcess::FailedToStart) {
+        // The helper is not installed. The index still works.
+        m_engines.clear();
+        emit resultsChanged();
+    }
+    emit statusChanged();
 }
 
 void Backend::setSelected(int index)
