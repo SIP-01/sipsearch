@@ -247,7 +247,8 @@ void Backend::onRefreshFinished(int code, QProcess::ExitStatus status)
     const QByteArray output = m_output.isEmpty() ? m_process->readAllStandardOutput() : m_output;
     m_output.clear();
     const QJsonDocument document = QJsonDocument::fromJson(output);
-    const QJsonArray rows = document.object().value("hits").toArray();
+    const QJsonObject root = document.object();
+    const QJsonArray rows = root.value("hits").toArray();
     if (rows.isEmpty()) {
         m_status = tr("The index could not be read");
         emit statusChanged();
@@ -277,7 +278,14 @@ void Backend::onRefreshFinished(int code, QProcess::ExitStatus status)
     }
 
     saveCache();
-    m_status = tr("%1 documents indexed").arg(m_corpus.size());
+
+    // Observations that failed the SIP-01 §18 check were discarded by the
+    // CLI. Say so, so a clean run and a lossy run do not look alike.
+    const int invalid = root.value("invalid_dropped").toInt(0);
+    m_invalidDropped = invalid;
+    m_status = invalid > 0
+        ? tr("%1 documents indexed (%2 unverified discarded)").arg(m_corpus.size()).arg(invalid)
+        : tr("%1 documents indexed").arg(m_corpus.size());
     emit statusChanged();
     rank();
 }

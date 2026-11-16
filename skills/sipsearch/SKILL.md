@@ -104,6 +104,18 @@ reimplements the wire format.
 The index is community-run, so it grows slowly and some pages are missing.
 That is the protocol, not a bug.
 
+### Verification
+
+The CLI verifies every observation against the SIP-01 spec §18 step 2 before
+the app sees it: the `d` tag must match the normalized `u` tag, and the `x`
+tag must match the content hash. Observations that fail are discarded and
+counted — the count appears in the app's status line and in its headless
+JSON as `invalid_dropped`. A live run currently discards around 30 out of
+several thousand.
+
+The app does not re-check what the CLI already checked. One implementation
+of the rule, not two.
+
 ## Browser integration
 
 Dsearch publishes an OpenSearch descriptor at `https://dsearch.com/opensearch.xml`.

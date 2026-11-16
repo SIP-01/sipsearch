@@ -1,3 +1,7 @@
 {
-  "%1 documents indexed": { "one": "%1 document indexed", "other": "%1 documents indexed" }
+  "%1 documents indexed": { "one": "%1 document indexed", "other": "%1 documents indexed" },
+  "%1 documents indexed (%2 unverified discarded)": {
+    "one": "%1 document indexed (%2 unverified discarded)",
+    "other": "%1 documents indexed (%2 unverified discarded)"
+  }
 }

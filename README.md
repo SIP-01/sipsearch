@@ -158,6 +158,13 @@ skills' scripts, reached through the `sip01-search` CLI. This app asks that
 CLI for the corpus and does the ranking itself. It never holds a Nostr key
 and never signs anything — reading the index needs no credentials.
 
+The CLI verifies every observation against the SIP-01 spec §18 step 2 before
+the app sees it: the `d` tag must match the normalized `u` tag, and the `x`
+tag must match the content hash. Observations that fail are discarded and
+counted, and the app shows the count in its status line and in its headless
+JSON as `invalid_dropped`. The app does not re-check what the CLI already
+checked — one implementation of the rule, not two.
+
 ## License
 
 MIT.

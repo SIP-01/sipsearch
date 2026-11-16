@@ -60,6 +60,7 @@ int runHeadless(const QStringList &arguments)
     QJsonObject document{
         {"query", query},
         {"total_documents", backend.totalDocuments()},
+        {"invalid_dropped", backend.invalidDropped()},
         {"hits", out},
     };
     // The instant answer, when the query has one — an agent should get it

@@ -30,6 +30,9 @@ class Backend : public QObject {
     // The instant answer for the query, when there is one: {kind, title,
     // detail}. Empty otherwise.
     Q_PROPERTY(QVariantMap instantAnswer READ instantAnswer NOTIFY queryChanged)
+    // How many observations the last refresh discarded because they failed
+    // the SIP-01 §18 verification check.
+    Q_PROPERTY(int invalidDropped READ invalidDropped NOTIFY statusChanged)
 
 public:
     explicit Backend(QObject *parent = nullptr);
@@ -42,6 +45,7 @@ public:
     bool queryHasError() const { return m_queryHadErrors; }
     QVariantMap instantAnswer() const { return m_instantAnswer; }
     int totalDocuments() const { return m_corpus.size(); }
+    int invalidDropped() const { return m_invalidDropped; }
     bool busy() const { return m_busy; }
     int selected() const { return m_selected; }
     void setSelected(int index);
@@ -80,6 +84,7 @@ private:
     QString m_query;
     QString m_status;
     int m_selected = 0;
+    int m_invalidDropped = 0;
     bool m_busy = false;
     bool m_queryHadErrors = false;
     QProcess *m_process = nullptr;
